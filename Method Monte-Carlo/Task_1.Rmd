@@ -1,0 +1,225 @@
+---
+title: "Вычисление интегралов методом Монте-Карло"
+author: "Николай Карасов"
+date: "2/17/2019"
+output: pdf_document
+header-includes:
+   - \usepackage[russian]{babel}
+---
+
+
+
+# Многомерный интеграл
+
+* Убедиться, что интеграл сходится.
+* Реализовать процедуру многомерного Монте-Карло интегрирования для произвольной линейно-ограниченной области с равномерной интегрирующей плотностью.
+* Вычислить интеграл методом Монте-Карло двумя способами: «в лоб» и через замену переменных области интегрирования к параллелепипеду («коробке»), или каким-либо иным «разумным» методом (например, за счет выбора зависимых случайных величин).
+
+# Сходимость
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+Имеется интеграл:
+
+$$ J = \frac{4}{\pi}\iiint\limits_{
+\begin{array}{c}
+x_{1}>0\\
+0 < x_{2} < bx_{1}\\
+x_{3} > cx_{1}
+\end{array}} \exp \left ( b^{2}x_{1}^{2} - x_{2}^{2} - x_{3}^{2} \right ) \text{d}x_{1}\text{d}x_{2}\text{d}x_{3}$$
+
+* Интеграл сходится при $b < c$.
+* Интеграл расходится при $b \geq c$.
+
+Пусть $c = 2$, а $b = 1$.
+```{r}
+b <- 1
+c <- 2
+```
+
+# Моделирование
+```{r setup1, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Перейдем к "коробке" и зададим соответсвтующую функцию `f_box`.
+```{r}
+f_box <- function(x1, x2, x3)
+  return (4*b* c / pi * (tan(x1))^2 / 
+            (cos(x1) * x3)^2 *
+            exp((tan(x1))^2 * (b^2 - b^2*(x2)^2 - (c)^2 * ((x3))^(-2))))
+```
+
+Зададим плотность `p`.
+```{r}
+p <- function(x1) 
+  return(dunif(x1, 0, pi/2))
+
+generate_unif_new <- function(n) {
+  x <- runif(n, 0, pi/2)
+  y <- runif(n)
+  z <- runif(n)
+
+  return (f_box(x,y,z) / p(x))
+}
+
+J <- mean(generate_unif_new(1000000))
+
+J
+
+```
+
+# Метод зависимых случайных велечин
+```{r setup2, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+Зададим исходную функцию `f`.
+
+```{r}
+f <- function(x1, x2, x3)
+  return(4/pi * exp(b^2 * x1^2 - x2^2 - x3^2))
+```
+
+Запишем функцию плотности.
+```{r}
+dep_new <- function(x1, x2, x3) {
+  xi <- dexp(x1, 1)
+  eta <- dunif(x2, min = 0, max = b * x1)
+  zeta <- dexp(x3, 1) * exp(c * x1)
+  return(xi * eta * zeta)
+}
+
+simulate_new <- function(n) {
+  x1 <- rexp(n, 1)
+  xk <- runif(n, min = 0, max = 1)
+  x2 <- xk * b * x1
+  xs <- rexp(n, rate = 1)
+  x3 <- c * x1 + xs
+  
+  return(f(x1,x2,x3) / dep_new(x1,x2,x3))
+}
+
+J <- mean(simulate_new(1000000))
+J
+```
+
+# Доверительные интервалы
+
+```{r}
+u <- function(t){
+  0.1+3.15*sqrt(t)
+}
+
+conf_int <- function(f, n){
+  sample <- f(n)
+  sequence <- seq(n)
+  #
+  t <- sequence/n
+  x <- cumsum(sample)/sequence
+  sd.mc <- sd(sample)
+  s <- sd.mc*sqrt(n)*u(t)/floor(n*t)
+  c_i_u <- x[n] + s 
+  c_i_l <- x[n] - s
+  #Поточечный
+  alpha <- 0.05
+  c_y <- qnorm(1-alpha/2)
+  s <- sd.mc * c_y / sqrt(sequence)
+  p_c_i_u <- x + s
+  p_c_i_l <- x - s
+  c_i <- data.frame(N = sequence, C_i_l = c_i_l, 
+                              C_i_u =  c_i_u, 
+                              Path = x,  
+                              P_c_i_l = p_c_i_l, 
+                              P_c_i_u = p_c_i_u)
+  
+  return(c_i)
+}
+
+conf.int <- conf_int(simulate_new, 100000)
+library("ggplot2")
+
+conf.int <- conf.int[-(1:1000),]
+
+ggplot(conf.int, aes(N, C_i_l, group = 1)) + 
+  geom_line(aes(color="C_I for trajectory")) +
+  geom_line(data = conf.int, aes(N, C_i_u, color="C_I for trajectory"))+
+  geom_line(data = conf.int, aes(N, Path, color="Int"))+
+  geom_line(data = conf.int, aes(N, P_c_i_l, color="Point-wise"))+
+  geom_line(data = conf.int, aes(N, P_c_i_u, color="Point-wise"))+
+  geom_line(aes(N, 0.0811536))+
+  labs(color="C_I") + 
+  xlab("Sample size") +
+  ylab("Integral value") + 
+  ggtitle("Dependent") 
+
+```
+
+```{r}
+conf.int.unif <- conf_int(generate_unif_new, 100000)
+library("ggplot2")
+
+conf.int.unif <- conf.int.unif[-(1:1000),]
+
+ggplot(conf.int.unif, aes(N, C_i_l, group = 1)) + 
+  geom_line(aes(color="C_I for trajectory")) +
+  geom_line(data = conf.int.unif, aes(N, C_i_u, color="C_I for trajectory"))+
+  geom_line(data = conf.int.unif, aes(N, Path, color="Int"))+
+  geom_line(data = conf.int.unif, aes(N, P_c_i_l, color="Point-wise"))+
+  geom_line(data = conf.int.unif, aes(N, P_c_i_u, color="Point-wise"))+
+    geom_line(aes(N, 0.0811536))+
+  labs(color="C_I") + 
+  xlab("Sample size") +
+  ylab("Integral value") + 
+  ggtitle("Unif") 
+```
+
+```{r}
+conf.int <- conf_int(simulate_new, 100000)
+conf.int.unif <- conf_int(generate_unif_new, 100000)
+
+conf_int_new<- function(f, n){
+  sample <- f(n)
+  sequence <- seq(n)
+  #
+  t <- sequence/n
+  x <- cumsum(sample)/sequence
+  sd.mc <- sd(sample)
+  s <- sd.mc*sqrt(n)*u(t)/floor(n*t)
+
+  #Поточечный
+  alpha <- 0.05
+  c_y <- qnorm(1-alpha/2)
+  s1 <- sd.mc * c_y / sqrt(sequence)
+
+  
+  return(s1)
+}
+
+s_u <- conf_int_new(generate_unif_new, 10000)
+s_d <- conf_int_new(simulate_new, 10000)
+plot(s_u)
+lines(s_d)
+```
+
+
+```{r}
+N <- c(10,100,500,1000,5000, 10000, 50000)
+deviation.uniform <- rep(0,length(N))
+deviation.dependent <- rep(0,length(N))
+for(k in 1:length(N)){
+  deviation.uniform[k] <- log(var(replicate(100, mean(generate_unif_new(N[k])))))
+  deviation.dependent[k] <- log(var(replicate(100, mean(simulate_new(N[k])))))
+}
+
+deviation <- data.frame(N = N, deviation.dependent = deviation.dependent, deviation.uniform = deviation.uniform)
+
+ggplot(deviation, aes(N, deviation.dependent, group = 1)) + 
+  geom_line(aes(color="Dependent variables")) +
+  geom_line(data = deviation, aes(N, deviation.uniform, color="Uniform distibution"))+
+  labs(color="Type of lines") + 
+  xlab("Sample size (log)") +
+  ylab("Variance") + 
+  ggtitle("Sample variance") +
+  scale_x_log10()+
+  theme_bw()
+```
